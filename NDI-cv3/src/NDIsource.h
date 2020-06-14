@@ -47,10 +47,10 @@ public:
             ofClear(255,255,255, 0);
             sender_Fbo.end();
             exitSender = false;
-
-            // OSC Sender
-            oscSender.setup(HOST, PORT);
         }
+    
+        // OSC Sender
+        oscSender.setup(HOST, PORT);    
     }
     
     void update(){
