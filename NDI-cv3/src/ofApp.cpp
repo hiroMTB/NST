@@ -1,5 +1,10 @@
 #include "ofApp.h"
 
+#define USE_TBB
+#ifdef USE_TBB
+#include "tbb/tbb.h"
+#endif
+
 using namespace ofxNDI::Recv;
 
 //--------------------------------------------------------------
@@ -77,23 +82,34 @@ void ofApp::NDIconnect(){
 void ofApp::update(){
     
     appPrm.set();
-    
     for (int i=0; i<ndis.size(); i++){
         ndis[i]->update();
     }
+    
+#ifdef USE_TBB
+    tbb::parallel_for(tbb::blocked_range<size_t>(0, ndis.size()), [&](const tbb::blocked_range<size_t> & r){
+        for(auto i=r.begin(); i!=r.end(); i++){
+            ndis[i]->findContour();
+        }
+    });
+#else
+    for (int i=0; i<ndis.size(); i++){
+        ndis[i]->findContour();
+    }
+#endif
 }
 
 
 //--------------------------------------------------------------
 void ofApp::draw(){
-    
+
     for (int i=0; i<ndis.size(); i++){
         ofPushMatrix();
         ofTranslate(0,i*250);
         ndis[i]->draw();
         ofPopMatrix();
     }
-    
+
     for (int i=0; i<ndis.size(); i++){
         ndis[i]->sendNDI();
     }
