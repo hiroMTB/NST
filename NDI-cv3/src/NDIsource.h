@@ -82,8 +82,8 @@ public:
                     }
 
                     if(bUseFD){
-                        grayFinal.absDiff(grayBg, grayImage);
-                        grayFinal.threshold(fdThreshold);
+                        grayDiff.absDiff(grayBg, grayImage);
+                        grayDiff.threshold(fdThreshold);
 
                         if (bLearnBakground) {
                             grayBg = grayImage;
@@ -95,8 +95,17 @@ public:
                         }
                     }else{
                         grayBg.clear();
-                        grayFinal = grayImage;
+                        grayDiff = grayImage;
                     }
+                    
+                    grayFinal = grayDiff;
+                    finalMat = ofxCv::toCv(grayFinal);
+                    
+                    if (bErode) ofxCv::erode(finalMat, finalMat, erodeNum);
+                    if (bDeliate) ofxCv::dilate(finalMat, finalMat, deliationNum);
+                    if (bMorph)cv::morphologyEx(finalMat, finalMat, morphType, cv::Mat());
+                    if (bGaussianBlur) ofxCv::GaussianBlur(finalMat, gBlurRadius);
+                    if (bMedianBlur) ofxCv::blur(finalMat, mBlurRadius);
                     
                     frameCounter++;
                 }
@@ -126,7 +135,8 @@ public:
             grayImage.draw(0,0,320,240);
             if(bUseFD){
                 grayBg.draw(320,0,320,240);
-                grayFinal.draw(640,0,320,240);
+                grayDiff.draw(640,0,320,240);
+                grayFinal.draw(960,0,320,240);
             }else{
                 ofNoFill();
                 ofSetColor(255);
@@ -134,6 +144,7 @@ public:
                 ofDrawLine(320, 0, 640, 240);
                 ofDrawLine(320, 240, 640, 0);
                 grayImage.draw(640, 0, 320, 240);
+                grayFinal.draw(960,0,320,240);
             }
             
            if(1){
@@ -165,7 +176,7 @@ public:
             float camHeight = grayFinal.getHeight();
             
             ofPushMatrix();
-            ofTranslate(640, 0);
+            ofTranslate(960, 0);
             
             ofxOscBundle bundle;
 
@@ -283,7 +294,9 @@ public:
     ofxCvGrayscaleImage grayImage;
     ofxCvGrayscaleImage grayImageFixed;
     ofxCvGrayscaleImage grayBg;
+    ofxCvGrayscaleImage grayDiff;
     ofxCvGrayscaleImage grayFinal;
+    cv::Mat finalMat;
     ofxCvContourFinder contourFinder;
     
     ofxCv::RectTracker tracker;
@@ -309,6 +322,33 @@ public:
     ofParameter<int> fdUpdateFrame{"FD fdUpdateFrame", 300, 0, 1000};
     ofParameterGroup fdGrp{"Frame Difference", bUseFD, fdThreshold, fdUpdateFrame};
     
+    // CV::Erode
+    ofParameter<bool> bErode{ "enable", false };
+    ofParameter<int> erodeNum{ "Iteration num", 1, 2, 10 };
+    ofParameterGroup erodeGrp{ "Erode", bErode, erodeNum };
+    
+    // CV::MorphologyEx
+    ofParameter<bool> bMorph{ "enable", true };
+    ofParameter<int> morphType{ "type", 0, 0, 6 };
+    ofParameterGroup morphGrp{ "Morph", bMorph, morphType };
+    
+    // CV::Deliate
+    ofParameter<bool> bDeliate{ "enable", false };
+    ofParameter<int> deliationNum{ "Iteration num", 1, 2, 10 };
+    ofParameterGroup deliateGrp{ "Deliate", bDeliate, deliationNum };
+    
+    // CV::Gausian Blur
+    ofParameter<bool> bGaussianBlur{ "enable", true };
+    ofParameter<float> gBlurRadius{ "blur radius", 5, 0, 100 };
+    ofParameterGroup gBlurGrp{ "Gaussian Blur", bGaussianBlur, gBlurRadius };
+    
+    // CV::Median Blur
+    ofParameter<bool> bMedianBlur{ "enable", false };
+    ofParameter<float> mBlurRadius{ "blur radius", 5, 0, 100 };
+    ofParameterGroup mBlurGrp{ "Median Blur", bMedianBlur, mBlurRadius };
+    
+    ofParameterGroup filterGrp{"Filters", erodeGrp, morphGrp, deliateGrp, gBlurGrp, mBlurGrp};
+    
     // CV::Contor, CV::Tracker
     ofParameter<bool> bAutoThreshold{ "Auto Threshold", false };
     ofParameter<float> threshold{ "threshold", 128, 0, 255 };
@@ -324,7 +364,7 @@ public:
     ofParameterGroup trackerGrp{ "Tracker", minAreaRadius, maxAreaRadius, bAutoThreshold, threshold, bFindHoles, bSimplify, persistence, maxDistance, smoothingRate, minAge, maxBlobNum };
     
     ofParameter<string> oscAddress{"oscAddress", "NDITracker"};
-    ofParameterGroup prm{"NDI source", NDI_name, showNDI, ndiOut, fdGrp, trackerGrp, oscAddress};
+    ofParameterGroup prm{"NDI source", NDI_name, showNDI, ndiOut, fdGrp, filterGrp, trackerGrp, oscAddress};
     
     ofEventListeners listenerHolder;
 };
