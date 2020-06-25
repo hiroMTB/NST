@@ -28,10 +28,9 @@ public:
     
     void setup(int w, int h){
         
-        grayImage.allocate(w,h);
-        grayBg.allocate(w,h);
-        grayFinal.allocate(w,h);
-        grayDiff.allocate(w,h);
+        currentImage.allocate(w,h);
+        currentImageFixed.allocate(w,h);
+        finalImage.allocate(w,h);
 
         // NDI sender
         setupNDI_OUT();
@@ -43,26 +42,14 @@ public:
         // OSC Sender
         oscSender.setup(HOST, PORT);
         
-        listenerHolder.push(bUseBG.newListener([&](bool & b){
-            if(bUseBG){
-                grayBg = grayImage;
-                grayFinal.clear();
-            }else{
-                grayBg.clear();
-                grayFinal.clear();
-            }
-        }));
+        listenerHolder.push(ndiOut.newListener([&](bool & b){ setupNDI_OUT(); }));
+        listenerHolder.push(bgAlgo.newListener([&](int & algo){ setupBS(); }));
         
-        listenerHolder.push(ndiOut.newListener([&](bool & b){
-            if(ndiOut && !sender.isSetup()){
-                setupNDI_OUT();
-            }
-        }));
-
+        setupBS();
     }
     
     void setupNDI_OUT(){
-        if(ndiOut){
+        if(ndiOut && !sender.isSetup()){
             std::string streamOutName =  prm.getName() + "-Out";
             ofLogNotice() << "Setup NDI sender " << streamOutName;
             if(sender.setup(streamOutName)) {
@@ -71,6 +58,14 @@ public:
             }else{
                 ofLogError() << "Can not setup NDI sender";
             }
+        }
+    }
+    
+    void setupBS(){
+        if (bgAlgo==0){
+            pBackSub = cv::createBackgroundSubtractorMOG2();
+        }else{
+            pBackSub = cv::createBackgroundSubtractorKNN();
         }
     }
     
@@ -86,54 +81,20 @@ public:
                     
                     if(xres != 0 && yres != 0 ){
                         video.decodeTo(pixels);
-                        pixels.setImageType(OF_IMAGE_GRAYSCALE);
-                        grayImageFixed.setFromPixels(pixels);
-                        grayImage.scaleIntoMe(grayImageFixed);
-                    }
+                        pixels.setImageType(OF_IMAGE_COLOR);
+                        currentImageFixed.setFromPixels(pixels);
 
-                    if(bUseBG){
-
-                        grayDiff.absDiff(grayBg, grayImage);
+                        currentImage.scaleIntoMe(currentImageFixed);
+                        currentMat = ofxCv::toCv(currentImage);
+                        pBackSub->apply(currentMat, foregroundMat);
                         
-                        grayDiff.threshold(bgThreshold);
+                        ofPixels pix;
+                        ofxCv::toOf(foregroundMat, pix);
+                        pix.setImageType(OF_IMAGE_GRAYSCALE);
+                        finalImage.setFromPixels(pix);
                         
-                        switch(bgMode){
-                            case 0:
-                                // single frame difference
-                                grayFinal = grayDiff;
-                                break;
-                            case 1:
-                                // additive background
-                                grayFinal += grayDiff;
-                                break;
-                            case 2:
-                            {
-                                cv::Mat diffMat = ofxCv::toCv(grayDiff);
-                                cv::Mat finalMat = ofxCv::toCv(grayFinal);
-                                diffMat.convertTo(finalMat, CV_32F);
-                                cv::accumulateWeighted(diffMat, finalMat, acmWeight);
-                                break;
-                            }
-                            case 3:
-                                //cv::background
-                                break;
-                        }
-                        
-                        if(bgMode >= 2){
-                            if (frameCounter >= bgUpdateFrame) {
-                                grayBg = grayImage;
-                                frameCounter =0;
-                                grayFinal = grayDiff;
-                            }
-                        }
-                    }else{
-                        grayBg.clear();
-                        grayFinal = grayImage;
+                        findContour();
                     }
-                    
-                    frameCounter++;
-                    
-                    findContour();
                 }
             }
         }
@@ -141,8 +102,8 @@ public:
 
     void findContour(){
         // contour finder
-        if(grayFinal.bAllocated){
-            contourFinder.findContours(grayFinal, minArea, maxArea, maxBlobNum, bFindHoles, bSimplify);
+        if(finalImage.bAllocated){
+            contourFinder.findContours(finalImage, minArea, maxArea, maxBlobNum, bFindHoles, bSimplify);
             
             rects.clear();
             for(auto & b : contourFinder.blobs){
@@ -155,55 +116,56 @@ public:
         }
     }
     
+    void sendNoteOnOff(){
+        // send /on, /off osc message
+        ofxOscBundle bundle;
+        const vector<unsigned int>& newLabels = tracker.getNewLabels();
+        const vector<unsigned int>& deadLabels = tracker.getDeadLabels();
+        for(int i = 0; i < newLabels.size(); i++) {
+            int label = newLabels[i];
+            ofxOscMessage m;
+            m.setAddress(oscAddress.get()+ "/" + ofToString(label%maxBlobNum+1) +"/on");
+            m.addIntArg(label);
+            bundle.addMessage(m);
+        }
+        for(int i = 0; i < deadLabels.size(); i++) {
+            int label = deadLabels[i];
+            ofxOscMessage m;
+            m.setAddress(oscAddress.get() + "/"+ ofToString(label%maxBlobNum+1) +"/off");
+            m.addIntArg(label);
+            bundle.addMessage(m);
+        }
+        
+        if(bundle.getMessageCount()>0){
+            oscSender.sendBundle(bundle);
+        }
+    }
+    
     void draw(){
         if(!showNDI) return;
         
         if(receiver.isConnected()){
         
+            sendNoteOnOff();
+            
             ofSetColor(255);
-            grayImage.draw(0,0,320,240);
-            if(bUseBG){
-                grayBg.draw(320,0,320,240);
-                grayFinal.draw(640,0,320,240);
-            }else{
-                ofNoFill();
-                ofSetColor(255);
-                ofDrawRectangle(320, 0, 320, 240);
-                ofDrawLine(320, 0, 640, 240);
-                ofDrawLine(320, 240, 640, 0);
-                grayImage.draw(640, 0, 320, 240);
-            }
+            currentImage.draw(0,0,320,240);
+            ofDrawBitmapStringHighlight("Current frame", +5, 25);
+
+            ofxCv::drawMat(foregroundMat, 320,0,320,240);
+            ofDrawBitmapStringHighlight("Foreground", 320+5, 25);
+
+            sender_Fbo.draw(640, 0, 320, 180);
+            ofNoFill();
+            ofSetColor(200,100);
+            ofDrawRectangle(640, 1, 320, 180);
+            ofDrawBitmapStringHighlight("FBO", 640+5, 25);
             
-           if(1){
-                // send /on, /off osc message
-                ofxOscBundle bundle;
-                const vector<unsigned int>& newLabels = tracker.getNewLabels();
-                const vector<unsigned int>& deadLabels = tracker.getDeadLabels();
-                for(int i = 0; i < newLabels.size(); i++) {
-                    int label = newLabels[i];
-                    ofxOscMessage m;
-                    m.setAddress(oscAddress.get()+ "/" + ofToString(label%maxBlobNum+1) +"/on");
-                    m.addIntArg(label);
-                    bundle.addMessage(m);
-                }
-                for(int i = 0; i < deadLabels.size(); i++) {
-                    int label = deadLabels[i];
-                    ofxOscMessage m;
-                    m.setAddress(oscAddress.get() + "/"+ ofToString(label%maxBlobNum+1) +"/off");
-                    m.addIntArg(label);
-                    bundle.addMessage(m);
-                }
-                
-                if(bundle.getMessageCount()>0){
-                    oscSender.sendBundle(bundle);
-                }
-            }
-            
-            float camWidth = grayFinal.getWidth();
-            float camHeight = grayFinal.getHeight();
+            float camWidth = finalImage.getWidth();
+            float camHeight = finalImage.getHeight();
             
             ofPushMatrix();
-            ofTranslate(960, 0);
+            ofTranslate(320, 0);
             
             ofxOscBundle bundle;
 
@@ -267,7 +229,6 @@ public:
                 }
             }
             ofPopMatrix();
-    
             if(bundle.getMessageCount()>0){
                 oscSender.sendBundle(bundle);
             }
@@ -282,7 +243,7 @@ public:
     void sendNDI(){
         if(ndiOut && sender.isSetup()){
             sender_Fbo.begin();
-            ofClear(0);
+            ofClear(0,0,0,0);
             contourFinder.draw();
             sender_Fbo.end();
             sender_Fbo.readToPixels(senderPixels);
@@ -294,11 +255,9 @@ public:
     ofxNDIReceiver receiver;
     ofxNDIRecvVideoFrameSync video;
     ofPixels pixels;
-    ofxCvGrayscaleImage grayImage;
-    ofxCvGrayscaleImage grayImageFixed;
-    ofxCvGrayscaleImage grayBg;
-    ofxCvGrayscaleImage grayDiff;
-    ofxCvGrayscaleImage grayFinal;
+    ofxCvColorImage currentImage;
+    ofxCvColorImage currentImageFixed;
+    ofxCvGrayscaleImage finalImage;
     ofxCvContourFinder contourFinder;
     
     ofxCv::RectTracker tracker;
@@ -318,13 +277,12 @@ public:
     ofParameter<bool> showNDI{"Show Stream",true};
     ofParameter<bool> ndiOut{"NDI OUT", true};
     
-    // Background
-    ofParameter<bool> bUseBG{"Use BG", false};
-    ofParameter<int>  bgThreshold{"Threshold", 80, 10, 300};
-    ofParameter<int> bgUpdateFrame{"Update Frame", 10, 0, 300};
-    ofParameter<int> bgMode{"Background Mode", 0, 0, 3}; // 0: instant diff, 1: add, 2: accumlate, 3: cv::background
-    ofParameter<float> acmWeight{"Accumulate Weight", 0.5, 0, 1.0};
-    ofParameterGroup bgGrp{"Background", bUseBG, bgThreshold, bgUpdateFrame, bgMode, acmWeight};
+    // cv::BackgroundSubtractor
+    cv::Ptr<cv::BackgroundSubtractor> pBackSub;
+    cv::Mat currentMat, foregroundMat;
+    
+    ofParameter<int> bgAlgo{"BG Algo", 1, 0, 1};
+    ofParameterGroup bgGrp{"Background Subtractor", bgAlgo};
     
     // CV::Contor, CV::Tracker
     ofParameter<float> minArea{ "minArea", 5, 0, 100*100 };
