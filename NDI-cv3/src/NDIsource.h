@@ -34,7 +34,7 @@ public:
 
         // NDI sender
         setupNDI_OUT();
-        sender_Fbo.allocate(640, 360, GL_RGBA);
+        sender_Fbo.allocate(w, h, GL_RGBA);
         sender_Fbo.begin();
         ofClear(255,255,255, 0);
         sender_Fbo.end();
@@ -147,19 +147,10 @@ public:
         if(receiver.isConnected()){
         
             sendNoteOnOff();
-            
             ofSetColor(255);
             currentImage.draw(0,0,320,240);
-            ofDrawBitmapStringHighlight("Current frame", +5, 25);
-
             ofxCv::drawMat(foregroundMat, 320,0,320,240);
-            ofDrawBitmapStringHighlight("Foreground", 320+5, 25);
-
-            sender_Fbo.draw(640, 0, 320, 180);
-            ofNoFill();
-            ofSetColor(200,100);
-            ofDrawRectangle(640, 1, 320, 180);
-            ofDrawBitmapStringHighlight("FBO", 640+5, 25);
+            sender_Fbo.draw(640, 0, 320, 240);
             
             float camWidth = finalImage.getWidth();
             float camHeight = finalImage.getHeight();
@@ -170,8 +161,6 @@ public:
             ofxOscBundle bundle;
 
             int nBlobs = contourFinder.blobs.size();
-
-            ofLogNotice() << nBlobs;
 
             int okBlobNum = 0;
             for(int i=0; i<nBlobs; i++){
